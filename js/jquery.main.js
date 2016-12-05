@@ -22,39 +22,39 @@ function initAnchors() {
 function initStars() {
 
 	$('#examples').jstars({
-		image_path: 'http://ohld98t52.bkt.clouddn.com/'
+		image_path: 'images'
 	});
 
 	$('#example-blue').jstars({
-		image_path: 'http://ohld98t52.bkt.clouddn.com/',
+		image_path: 'images',
 		style: 'blue',
     frequency: 15
 	});
 
 	$('#example-yellow').jstars({
-		image_path: 'http://ohld98t52.bkt.clouddn.com/',
+		image_path: 'images',
 		style: 'yellow',
 		frequency: 19
 	});
 
 	$('#example-green').jstars({
-		image_path: 'http://ohld98t52.bkt.clouddn.com/',
+		image_path: 'images',
 		style: 'green'
 	});
 
 	$('#example-red').jstars({
-		image_path: 'http://ohld98t52.bkt.clouddn.com/',
+		image_path: 'images',
 		style: 'red',
 		frequency: 5
 	});
 
 	$('#example-rand').jstars({
-		image_path: 'http://ohld98t52.bkt.clouddn.com/',
+		image_path: 'images',
 		style: 'rand'
 	});
 
 	$('#custom').jstars({
-		image_path: 'http://ohld98t52.bkt.clouddn.com/',
+		image_path: 'images',
     image: 'candy-cane-stars.png',
 		style: 'white',
     width: 34,
@@ -64,7 +64,7 @@ function initStars() {
 	});  
   
   $('#custom2').jstars({
-		image_path: 'http://ohld98t52.bkt.clouddn.com/',
+		image_path: 'images',
     image: 'jstar-map.png',
     style: 'rand',
     width: 27,

@@ -22,34 +22,34 @@ function initAnchors() {
 function initStars() {
 
 	$('#examples').jstars({
-		image_path: 'images'
+		image_path: 'http://ohld98t52.bkt.clouddn.com/'
 	});
 
 	$('#example-blue').jstars({
-		image_path: 'images',
+		image_path: 'http://ohld98t52.bkt.clouddn.com/',
 		style: 'blue',
     frequency: 15
 	});
 
 	$('#example-yellow').jstars({
-		image_path: 'images',
+		image_path: 'http://ohld98t52.bkt.clouddn.com/',
 		style: 'yellow',
 		frequency: 19
 	});
 
 	$('#example-green').jstars({
-		image_path: 'images',
+		image_path: 'http://ohld98t52.bkt.clouddn.com/',
 		style: 'green'
 	});
 
 	$('#example-red').jstars({
-		image_path: 'images',
+		image_path: 'http://ohld98t52.bkt.clouddn.com/',
 		style: 'red',
 		frequency: 5
 	});
 
 	$('#example-rand').jstars({
-		image_path: 'images',
+		image_path: 'http://ohld98t52.bkt.clouddn.com/',
 		style: 'rand'
 	});
 

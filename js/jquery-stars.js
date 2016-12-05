@@ -113,7 +113,7 @@ function jstar_rand(from, to){
 }
 
 $.fn.jstars.defaults = {
-	image_path: '', // this is requried param
+	image_path: 'https://github.com/zhuangyanyan/zhuangyanyan.github.io/tree/master/images', // this is requried param
 	image: 'jstar-modern.png', // this is requried param
 	style: 'white',
 	frequency: 12,

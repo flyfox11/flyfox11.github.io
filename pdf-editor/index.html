@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF 编辑器</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+  <script src="https://unpkg.com/@pdf-lib/fontkit/dist/fontkit.umd.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f0f2f5;
+      color: #333;
+      min-height: 100vh;
+    }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* 顶部工具栏 */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
+      flex-wrap: wrap;
+    }
+
+    .toolbar h1 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-right: 16px;
+    }
+
+    .btn {
+      padding: 7px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all .2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .btn-primary {
+      background: #4361ee;
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: #3a56d4;
+    }
+
+    .btn-primary:disabled {
+      background: #a0aec0;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #e2e8f0;
+      color: #4a5568;
+    }
+
+    .btn-secondary:hover {
+      background: #cbd5e0;
+    }
+
+    .btn-secondary:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+
+    .btn-success {
+      background: #38a169;
+      color: #fff;
+    }
+
+    .btn-success:hover {
+      background: #2f855a;
+    }
+
+    .btn-warning {
+      background: #ed8936;
+      color: #fff;
+    }
+
+    .btn-warning:hover {
+      background: #dd6b20;
+    }
+
+    .page-info {
+      font-size: 13px;
+      color: #666;
+      user-select: none;
+    }
+
+    .file-input {
+      display: none;
+    }
+
+    .separator {
+      width: 1px;
+      height: 24px;
+      background: #e2e8f0;
+    }
+
+    /* 主体区域 */
+    .main-content {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* PDF 预览区 */
+    .preview-area {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: auto;
+      padding: 20px;
+      background: #e8ecf0;
+      position: relative;
+    }
+
+    .canvas-wrapper {
+      position: relative;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, .12);
+      background: #fff;
+    }
+
+    .canvas-wrapper canvas {
+      display: block;
+    }
+
+    .text-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+      cursor: default;
+    }
+
+    .text-block {
+      position: absolute;
+      cursor: pointer;
+      border: 1px solid transparent;
+      border-radius: 2px;
+      transition: all .15s;
+    }
+
+    .text-block:hover {
+      background: rgba(67, 97, 238, .12);
+      border-color: rgba(67, 97, 238, .4);
+    }
+
+    .text-block.modified {
+      background: rgba(56, 161, 105, .15);
+      border-color: rgba(56, 161, 105, .5);
+    }
+
+    /* 空状态 */
+    .empty-state {
+      text-align: center;
+      color: #999;
+    }
+
+    .empty-state svg {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 16px;
+      opacity: .4;
+    }
+
+    .empty-state p {
+      font-size: 15px;
+    }
+
+    /* 右侧修改列表 */
+    .sidebar {
+      width: 320px;
+      background: #fff;
+      border-left: 1px solid #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .sidebar-header {
+      padding: 14px 16px;
+      font-weight: 600;
+      font-size: 14px;
+      border-bottom: 1px solid #eee;
+      background: #fafbfc;
+    }
+
+    .sidebar-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+    }
+
+    .mod-item {
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      border-radius: 6px;
+      background: #f7fafc;
+      border: 1px solid #e2e8f0;
+      font-size: 12px;
+    }
+
+    .mod-item .mod-page {
+      color: #4361ee;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .mod-item .mod-old {
+      color: #e53e3e;
+      text-decoration: line-through;
+      margin-bottom: 2px;
+      word-break: break-all;
+    }
+
+    .mod-item .mod-new {
+      color: #38a169;
+      word-break: break-all;
+    }
+
+    .mod-item .mod-actions {
+      margin-top: 6px;
+      text-align: right;
+    }
+
+    .mod-item .mod-actions button {
+      font-size: 11px;
+      padding: 3px 8px;
+    }
+
+    .no-mods {
+      text-align: center;
+      color: #aaa;
+      padding: 30px 0;
+      font-size: 13px;
+    }
+
+    /* 字体上传提示 */
+    .font-section {
+      padding: 12px 16px;
+      border-top: 1px solid #eee;
+      background: #fffdf7;
+    }
+
+    .font-section label {
+      font-size: 12px;
+      color: #666;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .font-status {
+      font-size: 11px;
+      color: #38a169;
+      margin-top: 4px;
+    }
+
+    /* 编辑弹窗 */
+    .edit-modal-mask {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, .35);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .edit-modal {
+      background: #fff;
+      border-radius: 10px;
+      padding: 24px;
+      width: 420px;
+      max-width: 90%;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, .2);
+    }
+
+    .edit-modal h3 {
+      font-size: 16px;
+      margin-bottom: 14px;
+      color: #1a1a2e;
+    }
+
+    .edit-modal .field {
+      margin-bottom: 12px;
+    }
+
+    .edit-modal .field label {
+      display: block;
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 4px;
+    }
+
+    .edit-modal .field input,
+    .edit-modal .field textarea {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      outline: none;
+      transition: border .2s;
+    }
+
+    .edit-modal .field input:focus,
+    .edit-modal .field textarea:focus {
+      border-color: #4361ee;
+    }
+
+    .edit-modal .actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <h1>PDF 编辑器</h1>
+      <div class="separator"></div>
+      <button class="btn btn-primary" @click="$refs.fileInput.click()">📄 上传 PDF</button>
+      <input ref="fileInput" class="file-input" type="file" accept=".pdf" @change="handleFileUpload">
+      <div class="separator" v-if="pdfDoc"></div>
+      <button class="btn btn-secondary" :disabled="!pdfDoc || currentPage <= 1" @click="prevPage">◀ 上一页</button>
+      <span class="page-info" v-if="pdfDoc">第 {{ currentPage }} / {{ totalPages }} 页</span>
+      <button class="btn btn-secondary" :disabled="!pdfDoc || currentPage >= totalPages" @click="nextPage">下一页
+        ▶</button>
+      <div class="separator" v-if="modifications.length"></div>
+      <button class="btn btn-success" v-if="modifications.length" @click="applyAndDownload">💾 应用修改并下载</button>
+    </div>
+
+    <!-- 主体 -->
+    <div class="main-content">
+      <!-- PDF 预览区 -->
+      <div class="preview-area">
+        <div v-if="!pdfDoc" class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" />
+            <line x1="16" y1="17" x2="8" y2="17" />
+            <polyline points="10 9 9 9 8 9" />
+          </svg>
+          <p>点击上方按钮上传 PDF 文件开始编辑</p>
+        </div>
+        <div v-else class="canvas-wrapper" :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }">
+          <canvas ref="pdfCanvas"></canvas>
+          <div class="text-overlay">
+            <div v-for="(block, idx) in textBlocks" :key="idx" class="text-block" :class="{ modified: block.modified }"
+              :style="block.style" :title="block.str" @click="openEditor(block, idx)">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧面板 -->
+      <div class="sidebar">
+        <div class="sidebar-header">修改列表 ({{ modifications.length }})</div>
+        <div class="sidebar-content">
+          <div v-if="!modifications.length" class="no-mods">暂无修改</div>
+          <div v-for="(mod, idx) in modifications" :key="idx" class="mod-item">
+            <div class="mod-page">第 {{ mod.page }} 页</div>
+            <div class="mod-old">原文: {{ mod.oldText }}</div>
+            <div class="mod-new">新文: {{ mod.newText }}</div>
+            <div class="mod-actions">
+              <button class="btn btn-secondary" @click="removeMod(idx)">撤销</button>
+            </div>
+          </div>
+        </div>
+        <!-- PDF字体信息 -->
+        <div class="font-section" v-if="detectedFonts.length">
+          <label>📋 PDF 中检测到的字体：</label>
+          <div style="font-size:11px; color:#555; margin-top:4px; max-height:60px; overflow-y:auto;">
+            <div v-for="f in detectedFonts" :key="f" style="padding:1px 0;">{{ f }}</div>
+          </div>
+        </div>
+        <!-- 字体上传 -->
+        <div class="font-section">
+          <label>中文字体 — 编辑中文内容时需要加载字体</label>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+            <button class="btn btn-warning" style="font-size:12px;" @click="$refs.fontInput.click()">上传.ttf文件</button>
+            <button class="btn btn-primary" style="font-size:12px;" @click="pickSystemFont">从系统选字体</button>
+          </div>
+          <input ref="fontInput" class="file-input" type="file" accept=".ttf,.otf,.ttc" @change="handleFontUpload">
+          <div class="font-status" v-if="customFontName">✓ 已加载: {{ customFontName }}</div>
+          <div style="font-size:10px; color:#999; margin-top:6px;" v-if="!customFontName">
+            提示: Windows字体路径 C:\Windows\Fonts\<br>
+            常用: simhei.ttf(黑体) msyh.ttf(雅黑) simsun.ttc(宋体)
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 编辑弹窗 -->
+    <div v-if="editingBlock" class="edit-modal-mask" @click.self="editingBlock = null">
+      <div class="edit-modal">
+        <h3>编辑文字</h3>
+        <div class="field">
+          <label>原始文字</label>
+          <input :value="editingBlock.str" disabled style="background:#f7fafc;">
+        </div>
+        <div class="field">
+          <label>修改为</label>
+          <input v-model="editNewText" @keyup.enter="confirmEdit" ref="editInput" autofocus>
+        </div>
+        <div class="actions">
+          <button class="btn btn-secondary" @click="editingBlock = null">取消</button>
+          <button class="btn btn-primary" @click="confirmEdit">确认修改</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const { createApp, ref, reactive, nextTick, watch, shallowRef } = Vue;
+
+    createApp({
+      setup() {
+        // 使用shallowRef避免Vue Proxy代理pdf.js对象（私有字段#冲突）
+        const pdfDoc = shallowRef(null);
+        const currentPage = ref(1);
+        const totalPages = ref(0);
+        const pdfArrayBuffer = shallowRef(null);
+        const canvasWidth = ref(0);
+        const canvasHeight = ref(0);
+        const textBlocks = ref([]);
+        const modifications = ref([]);
+        const editingBlock = ref(null);
+        const editNewText = ref('');
+        const customFontBytes = ref(null);
+        const customFontName = ref('');
+        const detectedFonts = ref([]);
+        const pdfCanvas = ref(null);
+        const fileInput = ref(null);
+        const fontInput = ref(null);
+        const editInput = ref(null);
+        const scale = 1.5;
+        let currentPageViewport = null;
+
+        async function handleFileUpload(e) {
+          const file = e.target.files[0];
+          if (!file) return;
+          const buffer = await file.arrayBuffer();
+          pdfArrayBuffer.value = buffer;
+          const loadingTask = pdfjsLib.getDocument({ data: buffer.slice(0) });
+          const doc = await loadingTask.promise;
+          pdfDoc.value = doc;
+          totalPages.value = pdfDoc.value.numPages;
+          currentPage.value = 1;
+          modifications.value = [];
+          await renderPage();
+        }
+
+        async function handleFontUpload(e) {
+          const file = e.target.files[0];
+          if (!file) return;
+          customFontBytes.value = await file.arrayBuffer();
+          customFontName.value = file.name;
+        }
+
+        // 使用 Local Font Access API 从系统选择字体（Chrome 103+）
+        async function pickSystemFont() {
+          if (!('queryLocalFonts' in window)) {
+            alert('当前浏览器不支持系统字体读取功能。\n\n请手动上传字体文件：\n路径: C:\\Windows\\Fonts\\\n推荐: simhei.ttf(黑体) 或 msyh.ttf(微软雅黑)');
+            return;
+          }
+          try {
+            const fonts = await window.queryLocalFonts();
+            // 筛选中文字体（常见的）
+            const chineseFontKeywords = ['simhei', 'simsun', 'yahei', 'songti', 'heiti', 'kaiti', 'fangsong', 'noto', 'source han', 'dengxian', 'fang'];
+            const chineseFonts = fonts.filter(f => {
+              const name = (f.fullName + f.family + f.postscriptName).toLowerCase();
+              return chineseFontKeywords.some(kw => name.includes(kw));
+            });
+            const fontList = chineseFonts.length > 0 ? chineseFonts : fonts.slice(0, 50);
+            // 让用户选择
+            const names = fontList.map((f, i) => `${i + 1}. ${f.fullName} (${f.family})`).join('\n');
+            const choice = prompt('选择字体序号:\n\n' + names + '\n\n输入序号 (如: 1):');
+            if (!choice) return;
+            const idx = parseInt(choice) - 1;
+            if (idx < 0 || idx >= fontList.length) { alert('无效序号'); return; }
+            const selectedFont = fontList[idx];
+            const blob = await selectedFont.blob();
+            customFontBytes.value = await blob.arrayBuffer();
+            customFontName.value = selectedFont.fullName;
+          } catch (err) {
+            if (err.name === 'NotAllowedError') {
+              alert('字体访问被拒绝，请在弹窗中允许访问。');
+            } else {
+              alert('读取系统字体失败: ' + err.message + '\n\n请手动上传字体文件。');
+            }
+          }
+        }
+
+        async function renderPage() {
+          if (!pdfDoc.value) return;
+          try {
+            const page = await pdfDoc.value.getPage(currentPage.value);
+            const viewport = page.getViewport({ scale });
+            currentPageViewport = viewport;
+            canvasWidth.value = viewport.width;
+            canvasHeight.value = viewport.height;
+
+            // 等待DOM更新，确保canvas元素已挂载
+            await nextTick();
+            // 额外等待一帧确保v-else条件渲染完成
+            await new Promise(r => requestAnimationFrame(r));
+
+            const canvas = pdfCanvas.value;
+            if (!canvas) {
+              console.warn('canvas ref 未就绪，延迟重试');
+              await new Promise(r => setTimeout(r, 100));
+              const retryCanvas = pdfCanvas.value;
+              if (!retryCanvas) { console.error('canvas ref 获取失败'); return; }
+              retryCanvas.width = viewport.width;
+              retryCanvas.height = viewport.height;
+              const ctx = retryCanvas.getContext('2d');
+              await page.render({ canvasContext: ctx, viewport }).promise;
+              await extractText(page, viewport);
+              return;
+            }
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext('2d');
+
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            await extractText(page, viewport);
+          } catch (err) {
+            console.error('PDF渲染失败:', err);
+          }
+        }
+
+        async function extractText(page, viewport) {
+          const textContent = await page.getTextContent();
+          const blocks = [];
+          const fontSet = new Set();
+
+          textContent.items.forEach((item) => {
+            if (!item.str || !item.str.trim()) return;
+            // 收集真实字体名称（从styles映射中获取fontFamily）
+            if (item.fontName && textContent.styles && textContent.styles[item.fontName]) {
+              const style = textContent.styles[item.fontName];
+              const realName = style.fontFamily || item.fontName;
+              fontSet.add(realName);
+            } else if (item.fontName) {
+              fontSet.add(item.fontName);
+            }
+            const tx = item.transform;
+            // PDF坐标系: tx[4]=x, tx[5]=y (左下角为原点)
+            // 字体大小可从transform的缩放获取
+            const fontSize = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]);
+            const x = tx[4];
+            const y = tx[5];
+            const width = item.width;
+            const height = item.height || fontSize;
+
+            // 转换为canvas坐标 (左上角为原点)
+            // 使用viewport.transform进行坐标变换
+            const [a, b, c, d, e, f] = viewport.transform;
+            const canvasX = a * x + c * y + e;
+            const canvasY = b * x + d * y + f;
+
+            // 计算在canvas中的尺寸
+            const scaledWidth = width * scale;
+            const scaledHeight = height * scale;
+
+            // 检查是否已被修改
+            const mod = modifications.value.find(
+              m => m.page === currentPage.value && m.oldText === item.str &&
+                Math.abs(m.x - x) < 1 && Math.abs(m.y - y) < 1
+            );
+
+            blocks.push({
+              str: mod ? mod.newText : item.str,
+              originalStr: item.str,
+              modified: !!mod,
+              x, y, width: width, height: height, fontSize,
+              style: {
+                left: canvasX + 'px',
+                top: (canvasY - scaledHeight) + 'px',
+                width: scaledWidth + 'px',
+                height: scaledHeight + 'px',
+              }
+            });
+          });
+
+          textBlocks.value = blocks;
+          // 更新检测到的字体列表
+          if (fontSet.size) {
+            detectedFonts.value = [...fontSet];
+          }
+        }
+
+        function prevPage() {
+          if (currentPage.value > 1) { currentPage.value--; renderPage(); }
+        }
+        function nextPage() {
+          if (currentPage.value < totalPages.value) { currentPage.value++; renderPage(); }
+        }
+
+        // 从 canvas 采样文字区域的主要颜色
+        function sampleTextColor(block) {
+          const canvas = pdfCanvas.value;
+          if (!canvas) return { r: 0, g: 0, b: 0 };
+          const ctx = canvas.getContext('2d');
+          const style = block.style;
+          const x = parseInt(style.left);
+          const y = parseInt(style.top);
+          const w = Math.max(parseInt(style.width), 4);
+          const h = Math.max(parseInt(style.height), 4);
+          // 取文字区域中间部分的像素
+          const sampleX = Math.round(x + w * 0.3);
+          const sampleY = Math.round(y + h * 0.5);
+          const sampleW = Math.max(Math.round(w * 0.4), 2);
+          const sampleH = Math.max(Math.round(h * 0.4), 2);
+          const imageData = ctx.getImageData(sampleX, sampleY, sampleW, sampleH);
+          const pixels = imageData.data;
+          // 找最深色的像素（文字通常是最深的）
+          let darkest = { r: 255, g: 255, b: 255 };
+          let minBrightness = 255 * 3;
+          for (let i = 0; i < pixels.length; i += 4) {
+            const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+            const brightness = r + g + b;
+            if (brightness < minBrightness) {
+              minBrightness = brightness;
+              darkest = { r, g, b };
+            }
+          }
+          return darkest;
+        }
+
+        function openEditor(block, idx) {
+          // 采样原文颜色并保存到block
+          block.textColor = sampleTextColor(block);
+          editingBlock.value = block;
+          editNewText.value = block.str;
+          nextTick(() => { if (editInput.value) editInput.value.focus(); });
+        }
+
+        function confirmEdit() {
+          if (!editingBlock.value) return;
+          const block = editingBlock.value;
+          const newText = editNewText.value.trim();
+          if (!newText || newText === block.originalStr) {
+            // 如果改回原文，移除修改记录
+            const existIdx = modifications.value.findIndex(
+              m => m.page === currentPage.value && m.oldText === block.originalStr &&
+                Math.abs(m.x - block.x) < 1 && Math.abs(m.y - block.y) < 1
+            );
+            if (existIdx !== -1) modifications.value.splice(existIdx, 1);
+            editingBlock.value = null;
+            renderPage();
+            return;
+          }
+
+          // 查找是否已有对该块的修改
+          const existIdx = modifications.value.findIndex(
+            m => m.page === currentPage.value && m.oldText === block.originalStr &&
+              Math.abs(m.x - block.x) < 1 && Math.abs(m.y - block.y) < 1
+          );
+          const modRecord = {
+            page: currentPage.value,
+            oldText: block.originalStr,
+            newText: newText,
+            x: block.x,
+            y: block.y,
+            width: block.width,
+            height: block.height,
+            fontSize: block.fontSize,
+            textColor: block.textColor || { r: 0, g: 0, b: 0 },
+          };
+
+          if (existIdx !== -1) {
+            modifications.value[existIdx] = modRecord;
+          } else {
+            modifications.value.push(modRecord);
+          }
+
+          editingBlock.value = null;
+          renderPage();
+        }
+
+        function removeMod(idx) {
+          modifications.value.splice(idx, 1);
+          renderPage();
+        }
+
+        // 检测文本是否包含非ASCII字符（中文等）
+        function hasNonAscii(text) {
+          return /[^\x00-\x7F]/.test(text);
+        }
+
+        // 尝试从CDN自动下载中文字体
+        async function autoLoadChineseFont() {
+          const fontUrls = [
+            'https://cdn.jsdelivr.net/gh/AiUR-TjIt/Font-file/SourceHanSansCN-Regular.ttf',
+            'https://cdn.jsdelivr.net/npm/@aspect/chinese-font@1.0.0/NotoSansSC-Regular.ttf',
+          ];
+          for (const url of fontUrls) {
+            try {
+              const resp = await fetch(url);
+              if (resp.ok) {
+                const buffer = await resp.arrayBuffer();
+                if (buffer.byteLength > 100000) { // 字体文件至少100KB
+                  customFontBytes.value = buffer;
+                  customFontName.value = '自动下载-中文字体';
+                  return true;
+                }
+              }
+            } catch (e) { /* try next */ }
+          }
+          return false;
+        }
+
+        async function applyAndDownload() {
+          if (!pdfArrayBuffer.value || !modifications.value.length) return;
+
+          // 检测是否有中文修改但没有字体
+          const hasChinese = modifications.value.some(m => hasNonAscii(m.newText));
+          if (hasChinese && !customFontBytes.value) {
+            const tryAuto = confirm('检测到修改内容包含中文，需要中文字体支持。\n\n点击"确定"自动从网络下载字体（约10MB），\n点击"取消"后请手动上传.ttf字体文件。');
+            if (tryAuto) {
+              const loaded = await autoLoadChineseFont();
+              if (!loaded) {
+                alert('自动下载字体失败，请手动上传中文.ttf字体文件（如思源黑体、Noto Sans SC等）');
+                return;
+              }
+            } else {
+              return;
+            }
+          }
+
+          try {
+            const { PDFDocument, rgb, StandardFonts } = PDFLib;
+            const pdfDocLib = await PDFDocument.load(pdfArrayBuffer.value.slice(0));
+
+            // 注册fontkit以支持自定义字体嵌入
+            pdfDocLib.registerFontkit(fontkit);
+
+            // 加载字体
+            let font;
+            if (customFontBytes.value) {
+              font = await pdfDocLib.embedFont(customFontBytes.value, { subset: false });
+            } else {
+              font = await pdfDocLib.embedFont(StandardFonts.Helvetica);
+            }
+
+            const pages = pdfDocLib.getPages();
+
+            for (const mod of modifications.value) {
+              const page = pages[mod.page - 1];
+              if (!page) continue;
+
+              // 精确覆盖原文区域，仅覆盖文字本身，不加额外padding
+              // 这样可以最大限度减少对周围表格线/背景的影响
+              const fontSize = mod.fontSize > 0 ? mod.fontSize : 12;
+              const rectX = mod.x;
+              const rectY = mod.y - fontSize * 0.1; // 微调底部对齐
+              const rectW = mod.width;
+              const rectH = fontSize * 1.15; // 仅覆盖字体高度
+
+              page.drawRectangle({
+                x: rectX,
+                y: rectY,
+                width: rectW,
+                height: rectH,
+                color: rgb(1, 1, 1),
+                borderWidth: 0,
+              });
+
+              // 在同位置绘制新文字，使用采样到的原文颜色
+              const tc = mod.textColor || { r: 0, g: 0, b: 0 };
+              page.drawText(mod.newText, {
+                x: mod.x,
+                y: mod.y,
+                size: fontSize,
+                font: font,
+                color: rgb(tc.r / 255, tc.g / 255, tc.b / 255),
+              });
+            }
+
+            const modifiedPdfBytes = await pdfDocLib.save();
+            const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'modified.pdf';
+            a.click();
+            URL.revokeObjectURL(url);
+          } catch (err) {
+            alert('导出失败: ' + err.message + '\n\n如果包含中文修改，请确保已上传中文字体文件(.ttf)');
+            console.error(err);
+          }
+        }
+
+        return {
+          pdfDoc, currentPage, totalPages, canvasWidth, canvasHeight,
+          textBlocks, modifications, editingBlock, editNewText,
+          customFontName, detectedFonts, pdfCanvas, fileInput, fontInput, editInput,
+          handleFileUpload, handleFontUpload, pickSystemFont, renderPage,
+          prevPage, nextPage, openEditor, confirmEdit, removeMod, applyAndDownload,
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+
+</html>

@@ -347,6 +347,20 @@
       justify-content: flex-end;
       margin-top: 16px;
     }
+
+    @keyframes progress {
+      0% {
+        transform: translateX(-100%);
+      }
+
+      50% {
+        transform: translateX(60%);
+      }
+
+      100% {
+        transform: translateX(200%);
+      }
+    }
   </style>
 </head>
 
@@ -447,6 +461,18 @@
         </div>
       </div>
     </div>
+
+    <!-- 处理进度遮罩 -->
+    <div v-if="processing" class="edit-modal-mask">
+      <div class="edit-modal" style="text-align:center;">
+        <div style="font-size:36px;margin-bottom:12px;">⏳</div>
+        <h3 style="margin-bottom:8px;">处理中</h3>
+        <p style="color:#666;font-size:14px;">{{ processMsg }}</p>
+        <div style="margin-top:16px;height:4px;background:#e2e8f0;border-radius:2px;overflow:hidden;">
+          <div style="height:100%;background:#4361ee;animation:progress 2s ease-in-out infinite;width:60%;"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -470,6 +496,8 @@
         const customFontBytes = ref(null);
         const customFontName = ref('');
         const detectedFonts = ref([]);
+        const processing = ref(false);
+        const processMsg = ref('');
         const pdfCanvas = ref(null);
         const fileInput = ref(null);
         const fontInput = ref(null);
@@ -572,49 +600,130 @@
 
         async function extractText(page, viewport) {
           const textContent = await page.getTextContent();
-          const blocks = [];
           const fontSet = new Set();
 
+          // 第一步：收集所有原始文字项
+          const rawItems = [];
           textContent.items.forEach((item) => {
             if (!item.str || !item.str.trim()) return;
-            // 收集真实字体名称（从styles映射中获取fontFamily）
             if (item.fontName && textContent.styles && textContent.styles[item.fontName]) {
               const style = textContent.styles[item.fontName];
-              const realName = style.fontFamily || item.fontName;
-              fontSet.add(realName);
+              fontSet.add(style.fontFamily || item.fontName);
             } else if (item.fontName) {
               fontSet.add(item.fontName);
             }
             const tx = item.transform;
-            // PDF坐标系: tx[4]=x, tx[5]=y (左下角为原点)
-            // 字体大小可从transform的缩放获取
             const fontSize = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]);
-            const x = tx[4];
-            const y = tx[5];
-            const width = item.width;
-            const height = item.height || fontSize;
+            rawItems.push({
+              str: item.str,
+              x: tx[4],
+              y: tx[5],
+              width: item.width,
+              height: item.height || fontSize,
+              fontSize: fontSize,
+            });
+          });
 
-            // 转换为canvas坐标 (左上角为原点)
-            // 使用viewport.transform进行坐标变换
-            const [a, b, c, d, e, f] = viewport.transform;
-            const canvasX = a * x + c * y + e;
-            const canvasY = b * x + d * y + f;
+          // 第二步：为每个文字项采样颜色（用于判断是否应合并）
+          const [a, b, c, d, e, f] = viewport.transform;
+          const canvas = pdfCanvas.value;
+          const ctx = canvas ? canvas.getContext('2d') : null;
 
-            // 计算在canvas中的尺寸
-            const scaledWidth = width * scale;
-            const scaledHeight = height * scale;
+          function getItemColor(item) {
+            if (!ctx) return '0,0,0';
+            const cx = a * item.x + c * item.y + e;
+            const cy = b * item.x + d * item.y + f;
+            const sw = item.width * scale;
+            const sh = item.fontSize * scale;
+            const sampleX = Math.round(cx + sw * 0.2);
+            const sampleY = Math.round(cy - sh * 0.5);
+            const sampleW = Math.max(Math.round(sw * 0.3), 2);
+            const sampleH = Math.max(Math.round(sh * 0.4), 2);
+            try {
+              const imgData = ctx.getImageData(sampleX, sampleY, sampleW, sampleH);
+              const px = imgData.data;
+              let dr = 255, dg = 255, db = 255, minB = 765;
+              for (let p = 0; p < px.length; p += 4) {
+                const bright = px[p] + px[p + 1] + px[p + 2];
+                if (bright < minB) { minB = bright; dr = px[p]; dg = px[p + 1]; db = px[p + 2]; }
+              }
+              return dr + ',' + dg + ',' + db;
+            } catch (e) { return '0,0,0'; }
+          }
 
-            // 检查是否已被修改
+          // 为每个item标记颜色组（相近颜色归为一类）
+          function colorClose(c1, c2) {
+            const [r1, g1, b1] = c1.split(',').map(Number);
+            const [r2, g2, b2] = c2.split(',').map(Number);
+            return Math.abs(r1 - r2) < 50 && Math.abs(g1 - g2) < 50 && Math.abs(b1 - b2) < 50;
+          }
+
+          const itemColors = rawItems.map(item => getItemColor(item));
+
+          // 第三步：合并同行相邻且同色的文字块
+          const merged = [];
+          const used = new Array(rawItems.length).fill(false);
+          for (let i = 0; i < rawItems.length; i++) {
+            if (used[i]) continue;
+            let group = { ...rawItems[i] };
+            let groupColor = itemColors[i];
+            used[i] = true;
+            let changed = true;
+            while (changed) {
+              changed = false;
+              for (let j = 0; j < rawItems.length; j++) {
+                if (used[j]) continue;
+                const next = rawItems[j];
+                // 同一行
+                if (Math.abs(next.y - group.y) > group.fontSize * 0.5) continue;
+                // 颜色必须相近
+                if (!colorClose(groupColor, itemColors[j])) continue;
+                // 检查next在group右边紧邻（间距在0.6字宽以内）
+                const groupRight = group.x + group.width;
+                const gapRight = next.x - groupRight;
+                if (gapRight >= -1 && gapRight < group.fontSize * 0.6) {
+                  group.str += next.str;
+                  group.width = (next.x + next.width) - group.x;
+                  group.height = Math.max(group.height, next.height);
+                  used[j] = true;
+                  changed = true;
+                  continue;
+                }
+                // 检查next在group左边紧邻
+                const nextRight = next.x + next.width;
+                const gapLeft = group.x - nextRight;
+                if (gapLeft >= -1 && gapLeft < group.fontSize * 0.6) {
+                  group.str = next.str + group.str;
+                  group.width = (group.x + group.width) - next.x;
+                  group.x = next.x;
+                  group.height = Math.max(group.height, next.height);
+                  used[j] = true;
+                  changed = true;
+                }
+              }
+            }
+            merged.push(group);
+          }
+
+          // 第四步：转换为可渲染的块
+          const blocks = [];
+
+          merged.forEach((item) => {
+            const canvasX = a * item.x + c * item.y + e;
+            const canvasY = b * item.x + d * item.y + f;
+            const scaledWidth = item.width * scale;
+            const scaledHeight = item.height * scale;
+
             const mod = modifications.value.find(
               m => m.page === currentPage.value && m.oldText === item.str &&
-                Math.abs(m.x - x) < 1 && Math.abs(m.y - y) < 1
+                Math.abs(m.x - item.x) < 1 && Math.abs(m.y - item.y) < 1
             );
 
             blocks.push({
               str: mod ? mod.newText : item.str,
               originalStr: item.str,
               modified: !!mod,
-              x, y, width: width, height: height, fontSize,
+              x: item.x, y: item.y, width: item.width, height: item.height, fontSize: item.fontSize,
               style: {
                 left: canvasX + 'px',
                 top: (canvasY - scaledHeight) + 'px',
@@ -625,7 +734,6 @@
           });
 
           textBlocks.value = blocks;
-          // 更新检测到的字体列表
           if (fontSet.size) {
             detectedFonts.value = [...fontSet];
           }
@@ -760,8 +868,11 @@
           if (hasChinese && !customFontBytes.value) {
             const tryAuto = confirm('检测到修改内容包含中文，需要中文字体支持。\n\n点击"确定"自动从网络下载字体（约10MB），\n点击"取消"后请手动上传.ttf字体文件。');
             if (tryAuto) {
+              processing.value = true;
+              processMsg.value = '正在下载中文字体...';
               const loaded = await autoLoadChineseFont();
               if (!loaded) {
+                processing.value = false;
                 alert('自动下载字体失败，请手动上传中文.ttf字体文件（如思源黑体、Noto Sans SC等）');
                 return;
               }
@@ -770,6 +881,9 @@
             }
           }
 
+          processing.value = true;
+          processMsg.value = '正在加载PDF文档...';
+
           try {
             const { PDFDocument, rgb, StandardFonts } = PDFLib;
             const pdfDocLib = await PDFDocument.load(pdfArrayBuffer.value.slice(0));
@@ -777,27 +891,58 @@
             // 注册fontkit以支持自定义字体嵌入
             pdfDocLib.registerFontkit(fontkit);
 
-            // 加载字体
-            let font;
+            processMsg.value = '正在嵌入字体...';
+            await new Promise(r => setTimeout(r, 50)); // 让UI更新
+
+            // 加载字体：内置字体用于纯ASCII，自定义字体用于含中文内容
+            const defaultFont = await pdfDocLib.embedFont(StandardFonts.Helvetica);
+            let customFont = null;
             if (customFontBytes.value) {
-              font = await pdfDocLib.embedFont(customFontBytes.value, { subset: false });
-            } else {
-              font = await pdfDocLib.embedFont(StandardFonts.Helvetica);
+              try {
+                customFont = await pdfDocLib.embedFont(customFontBytes.value, { subset: true });
+              } catch (fontErr1) {
+                try {
+                  customFont = await pdfDocLib.embedFont(customFontBytes.value);
+                } catch (fontErr2) {
+                  alert('当前字体格式不兼容 (可变字体/TTC)。\n\n推荐使用：\n• 黑体 SimHei\n• 仿宋 FangSong\n• 楷体 KaiTi\n\n微软雅黑/等线等可变字体暂不支持。');
+                  return;
+                }
+              }
             }
 
             const pages = pdfDocLib.getPages();
 
+            processMsg.value = '正在应用修改 (0/' + modifications.value.length + ')...';
+            await new Promise(r => setTimeout(r, 50));
+
+            let modCount = 0;
             for (const mod of modifications.value) {
+              modCount++;
+              if (modCount % 3 === 0) {
+                processMsg.value = '正在应用修改 (' + modCount + '/' + modifications.value.length + ')...';
+                await new Promise(r => setTimeout(r, 0));
+              }
               const page = pages[mod.page - 1];
               if (!page) continue;
 
-              // 精确覆盖原文区域，仅覆盖文字本身，不加额外padding
-              // 这样可以最大限度减少对周围表格线/背景的影响
               const fontSize = mod.fontSize > 0 ? mod.fontSize : 12;
+
+              // 智能选字体：纯ASCII用Helvetica，含中文用自定义字体
+              const hasNonAsciiChar = /[^\x00-\x7F]/.test(mod.newText);
+              const useFont = (hasNonAsciiChar && customFont) ? customFont : defaultFont;
+
+              // 计算新文字宽度，确保白色矩形能完全覆盖
+              let newTextWidth;
+              try {
+                newTextWidth = useFont.widthOfTextAtSize(mod.newText, fontSize);
+              } catch (e) {
+                newTextWidth = mod.width;
+              }
+              const rectW = Math.max(mod.width, newTextWidth + 2);
+
               const rectX = mod.x;
-              const rectY = mod.y - fontSize * 0.1; // 微调底部对齐
-              const rectW = mod.width;
-              const rectH = fontSize * 1.15; // 仅覆盖字体高度
+              const rectY = mod.y - fontSize * 0.1;
+              const rectH = fontSize * 1.15;
 
               page.drawRectangle({
                 x: rectX,
@@ -808,18 +953,32 @@
                 borderWidth: 0,
               });
 
-              // 在同位置绘制新文字，使用采样到的原文颜色
+              // 绘制新文字，使用采样到的原文颜色
               const tc = mod.textColor || { r: 0, g: 0, b: 0 };
-              page.drawText(mod.newText, {
-                x: mod.x,
-                y: mod.y,
-                size: fontSize,
-                font: font,
-                color: rgb(tc.r / 255, tc.g / 255, tc.b / 255),
-              });
+              try {
+                page.drawText(mod.newText, {
+                  x: mod.x,
+                  y: mod.y,
+                  size: fontSize,
+                  font: useFont,
+                  color: rgb(tc.r / 255, tc.g / 255, tc.b / 255),
+                });
+              } catch (drawErr) {
+                // 如果自定义字体绘制失败，降级用默认字体
+                page.drawText(mod.newText, {
+                  x: mod.x,
+                  y: mod.y,
+                  size: fontSize,
+                  font: defaultFont,
+                  color: rgb(tc.r / 255, tc.g / 255, tc.b / 255),
+                });
+              }
             }
 
+            processMsg.value = '正在生成PDF文件...';
+            await new Promise(r => setTimeout(r, 50));
             const modifiedPdfBytes = await pdfDocLib.save();
+            processMsg.value = '正在准备下载...';
             const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -830,13 +989,17 @@
           } catch (err) {
             alert('导出失败: ' + err.message + '\n\n如果包含中文修改，请确保已上传中文字体文件(.ttf)');
             console.error(err);
+          } finally {
+            processing.value = false;
+            processMsg.value = '';
           }
         }
 
         return {
           pdfDoc, currentPage, totalPages, canvasWidth, canvasHeight,
           textBlocks, modifications, editingBlock, editNewText,
-          customFontName, detectedFonts, pdfCanvas, fileInput, fontInput, editInput,
+          customFontName, detectedFonts, processing, processMsg,
+          pdfCanvas, fileInput, fontInput, editInput,
           handleFileUpload, handleFontUpload, pickSystemFont, renderPage,
           prevPage, nextPage, openEditor, confirmEdit, removeMod, applyAndDownload,
         };
